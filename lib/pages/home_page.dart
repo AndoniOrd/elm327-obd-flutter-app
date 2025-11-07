@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/sensor.dart';
 import '../services/simulator_service.dart';
+import '../widgets/sensor_card.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,8 +17,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    
-    // Pequeño delay para asegurar que el widget esté montado
+
+    // Añadimos un pequeño delay para evitar errores de contexto
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _simulator.startSimulation((data) {
         if (mounted) {
@@ -41,6 +42,21 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('OBD Dashboard'),
         backgroundColor: Colors.blueAccent,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              _simulator.stopSimulation();
+              _simulator.startSimulation((data) {
+                if (mounted) {
+                  setState(() {
+                    sensors = data;
+                  });
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -57,26 +73,9 @@ class _HomePageState extends State<HomePage> {
               )
             : ListView(
                 children: sensors.values.map((sensor) {
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      title: Text(
-                        sensor.name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      trailing: Text(
-                        "${sensor.value.toStringAsFixed(1)} ${sensor.unit}",
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blueAccent,
-                        ),
-                      ),
-                    ),
-                  );
+                  return SensorCard(
+                    sensor: sensor,
+                  ); // 👈 Usamos tu nuevo widget
                 }).toList(),
               ),
       ),
