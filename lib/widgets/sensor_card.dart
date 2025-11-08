@@ -9,19 +9,24 @@ class SensorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: ListTile(
-        title: Text(
-          sensor.name,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
-        ),
-        trailing: Text(
-          '${sensor.value.toStringAsFixed(1)} ${sensor.unit}',
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.blueAccent,
-          ),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(sensor.name,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            Text(
+              "${sensor.value.toStringAsFixed(1)} ${sensor.unit}",
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueAccent,
+              ),
+            ),
+          ],
         ),
       ),
     );
