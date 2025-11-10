@@ -7,8 +7,6 @@ class OBDService {
   BluetoothCharacteristic? _readChar;
 
   Future<void> connectToElm327() async {
-    var flutterBlue = FlutterBluePlus();
-
     print('🔍 Escaneando dispositivos ELM327...');
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
 
@@ -16,9 +14,9 @@ class OBDService {
     List<ScanResult> results = [];
     await for (final snapshot in FlutterBluePlus.scanResults) {
       results = snapshot;
-      if (results.any((r) =>
-          r.device.name.contains('OBD') ||
-          r.device.name.contains('ELM'))) {
+      if (results.any(
+        (r) => r.device.name.contains('OBD') || r.device.name.contains('ELM'),
+      )) {
         break;
       }
     }
@@ -33,7 +31,7 @@ class OBDService {
     _device = elmResult.device;
 
     print('✅ ELM327 encontrado: ${_device!.name}');
-    await _device!.connect();
+    await _device!.connect(license: true, autoConnect: false);
 
     // Buscar servicios
     List<BluetoothService> services = await _device!.discoverServices();
