@@ -31,6 +31,10 @@ dependencies:
   flutter:
     sdk: flutter
   
+  flutter_bluetooth_serial:
+    git:
+      url: https://github.com/edufolly/flutter_bluetooth_serial.git
+      ref: master
   flutter_blue_plus: ^2.0.1
   permission_handler: ^12.0.1
 

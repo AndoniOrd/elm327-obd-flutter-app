@@ -1,67 +1,102 @@
+// lib/services/obd_service.dart
+import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'dart:typed_data';
 
 class OBDService {
-  BluetoothDevice? _device;
-  BluetoothCharacteristic? _writeChar;
-  BluetoothCharacteristic? _readChar;
+  BluetoothConnection? _connection;
+  StreamSubscription<Uint8List>? _inputSubscription;
+  final _readBuffer = StringBuffer();
+  Completer<String>? _pendingResponse;
 
+  /// Conecta al adaptador Vgate iCar Pro (Bluetooth clásico / SPP)
   Future<void> connectToElm327() async {
-    print('🔍 Escaneando dispositivos Bluetooth...');
+    print('🔍 Buscando adaptadores Bluetooth emparejados...');
+    final bondedDevices = await FlutterBluetoothSerial.instance
+        .getBondedDevices();
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
-
-    List<ScanResult> results = [];
-    await for (final snapshot in FlutterBluePlus.scanResults) {
-      results = snapshot;
-      // Buscamos exactamente "Android-Vlink"
-      if (results.any((r) => r.device.name == 'Android-Vlink')) {
-        break;
-      }
-    }
-
-    await FlutterBluePlus.stopScan();
-
-    final targetResult = results.firstWhere(
-      (r) => r.device.name == 'Android-Vlink',
-      orElse: () => throw Exception('❌ No se encontró Android-Vlink'),
+    // Busca por nombre (vgate, vlink, obd, etc)
+    final device = bondedDevices.firstWhere(
+          (d) => d.name == 'Android-Vlink',
+      orElse: () {
+        // Si no encuentra exactamente 'Android-Vlink', busca por nombre parcial
+        final fallback = bondedDevices.firstWhere(
+              (d) {
+            final n = d.name?.toLowerCase() ?? '';
+            return n.contains('vgate') || n.contains('icar') || n.contains('vlink');
+          },
+          orElse: () => throw Exception('❌ No se encontró ningún adaptador Vgate/OBD emparejado.'),
+        );
+        return fallback;
+      },
     );
 
-    _device = targetResult.device;
+    print('✅ Dispositivo encontrado: ${device.name} (${device.address})');
+    print('🔗 Conectando vía SPP...');
 
-    print('✅ Dispositivo encontrado: ${_device!.name}');
+    _connection = await BluetoothConnection.toAddress(device.address);
+    print('✅ Conectado a ${device.name}');
 
-    await _device!.connect(
-      license: License.free,
-      autoConnect: false,
-      timeout: const Duration(seconds: 10),
+    _inputSubscription = _connection!.input!.listen(
+      (data) {
+        final chunk = ascii.decode(data, allowInvalid: true);
+        _readBuffer.write(chunk);
+        // Los ELM327 terminan sus respuestas con el prompt '>'
+        if (_readBuffer.toString().contains('>')) {
+          final response = _readBuffer.toString();
+          _readBuffer.clear();
+          _pendingResponse?.complete(response);
+          _pendingResponse = null;
+        }
+      },
+      onDone: () {
+        print('🔌 Conexión finalizada por el dispositivo');
+      },
     );
+  }
 
-    // Descubrir servicios y características
-    List<BluetoothService> services = await _device!.discoverServices();
-    for (var service in services) {
-      for (var c in service.characteristics) {
-        if (c.properties.write) _writeChar = c;
-        if (c.properties.notify || c.properties.read) _readChar = c;
-      }
+  /// Envía un comando OBD-II al ELM327 y devuelve la respuesta
+  Future<String> sendCommand(
+    String command, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    if (_connection == null || !_connection!.isConnected) {
+      throw Exception('No hay conexión activa con el adaptador OBD');
     }
 
-    print('🔗 Conectado y listo para enviar comandos OBD.');
+    _pendingResponse = Completer<String>();
+    _connection!.output.add(utf8.encode('$command\r'));
+    await _connection!.output.allSent;
+
+    try {
+      final raw = await _pendingResponse!.future.timeout(timeout);
+      final clean = _cleanResponse(raw);
+      print('📡 CMD: $command → RESP: $clean');
+      return clean;
+    } on TimeoutException {
+      print('⏰ Timeout esperando respuesta de $command');
+      return 'NO DATA';
+    } catch (e) {
+      print('❌ Error en sendCommand: $e');
+      return 'ERROR';
+    }
   }
 
-  Future<String> sendCommand(String cmd) async {
-    if (_writeChar == null) return 'No conectado';
-
-    final data = ascii.encode('$cmd\r');
-    await _writeChar!.write(data, withoutResponse: true);
-
-    await Future.delayed(const Duration(milliseconds: 500));
-    final response = await _readChar?.read();
-    return ascii.decode(response ?? []);
+  /// Limpia el texto de la respuesta OBD (quita >, CR/LF, etc)
+  String _cleanResponse(String input) {
+    return input
+        .replaceAll(RegExp(r'(\r|\n|>)'), ' ')
+        .replaceAll(RegExp(r'SEARCHING\.\.\.'), '')
+        .replaceAll(RegExp(r'NO DATA'), '')
+        .trim();
   }
 
+  /// Cierra la conexión
   Future<void> disconnect() async {
-    await _device?.disconnect();
-    _device = null;
+    await _inputSubscription?.cancel();
+    await _connection?.close();
+    _connection = null;
+    print('🔒 Conexión cerrada.');
   }
 }
