@@ -7,33 +7,37 @@ class OBDService {
   BluetoothCharacteristic? _readChar;
 
   Future<void> connectToElm327() async {
-    print('🔍 Escaneando dispositivos ELM327...');
+    print('🔍 Escaneando dispositivos Bluetooth...');
+
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
 
-    // Escuchar resultados del escaneo
     List<ScanResult> results = [];
     await for (final snapshot in FlutterBluePlus.scanResults) {
       results = snapshot;
-      if (results.any(
-        (r) => r.device.name.contains('OBD') || r.device.name.contains('ELM'),
-      )) {
+      // Buscamos exactamente "Android-Vlink"
+      if (results.any((r) => r.device.name == 'Android-Vlink')) {
         break;
       }
     }
 
     await FlutterBluePlus.stopScan();
 
-    final elmResult = results.firstWhere(
-      (r) => r.device.name.contains('OBD') || r.device.name.contains('ELM'),
-      orElse: () => throw Exception('❌ No se encontró un ELM327'),
+    final targetResult = results.firstWhere(
+      (r) => r.device.name == 'Android-Vlink',
+      orElse: () => throw Exception('❌ No se encontró Android-Vlink'),
     );
 
-    _device = elmResult.device;
+    _device = targetResult.device;
 
-    print('✅ ELM327 encontrado: ${_device!.name}');
-    await _device!.connect(license: true, autoConnect: false);
+    print('✅ Dispositivo encontrado: ${_device!.name}');
 
-    // Buscar servicios
+    await _device!.connect(
+      license: License.free,
+      autoConnect: false,
+      timeout: const Duration(seconds: 10),
+    );
+
+    // Descubrir servicios y características
     List<BluetoothService> services = await _device!.discoverServices();
     for (var service in services) {
       for (var c in service.characteristics) {
@@ -42,7 +46,7 @@ class OBDService {
       }
     }
 
-    print('🔗 Conectado y listo para comandos OBD.');
+    print('🔗 Conectado y listo para enviar comandos OBD.');
   }
 
   Future<String> sendCommand(String cmd) async {
