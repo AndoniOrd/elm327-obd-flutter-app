@@ -1,8 +1,8 @@
 // lib/services/obd_service.dart
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'dart:typed_data';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 
 class OBDService {
   BluetoothConnection? _connection;
@@ -10,19 +10,19 @@ class OBDService {
   final _readBuffer = StringBuffer();
   Completer<String>? _pendingResponse;
 
+  void Function(String msg)? logCallback;
+
   /// Conecta al adaptador Vgate iCar Pro (Bluetooth clásico / SPP)
   Future<void> connectToElm327() async {
-    print('🔍 Buscando adaptadores Bluetooth emparejados...');
-    final bondedDevices = await FlutterBluetoothSerial.instance
-        .getBondedDevices();
+    logCallback?.call('🔍 Buscando adaptadores Bluetooth emparejados...');
+    final bondedDevices = await FlutterBluetoothSerial.instance.getBondedDevices();
 
-    // Busca por nombre (vgate, vlink, obd, etc)
+    // Busca por nombre exacto o parcial
     final device = bondedDevices.firstWhere(
-          (d) => d.name == 'Android-Vlink',
+      (d) => d.name == 'Android-Vlink',
       orElse: () {
-        // Si no encuentra exactamente 'Android-Vlink', busca por nombre parcial
         final fallback = bondedDevices.firstWhere(
-              (d) {
+          (d) {
             final n = d.name?.toLowerCase() ?? '';
             return n.contains('vgate') || n.contains('icar') || n.contains('vlink');
           },
@@ -32,17 +32,22 @@ class OBDService {
       },
     );
 
-    print('✅ Dispositivo encontrado: ${device.name} (${device.address})');
-    print('🔗 Conectando vía SPP...');
+    logCallback?.call('✅ Dispositivo encontrado: ${device.name} (${device.address})');
+    logCallback?.call('🔗 Conectando vía SPP...');
 
+    // Conexión Bluetooth clásico
     _connection = await BluetoothConnection.toAddress(device.address);
-    print('✅ Conectado a ${device.name}');
+    logCallback?.call('✅ Conectado a ${device.name}');
 
+    // Cancela suscripción previa si existía
+    await _inputSubscription?.cancel();
+
+    // Escucha la entrada una sola vez
     _inputSubscription = _connection!.input!.listen(
       (data) {
         final chunk = ascii.decode(data, allowInvalid: true);
         _readBuffer.write(chunk);
-        // Los ELM327 terminan sus respuestas con el prompt '>'
+
         if (_readBuffer.toString().contains('>')) {
           final response = _readBuffer.toString();
           _readBuffer.clear();
@@ -50,17 +55,25 @@ class OBDService {
           _pendingResponse = null;
         }
       },
-      onDone: () {
-        print('🔌 Conexión finalizada por el dispositivo');
-      },
+      onDone: () => logCallback?.call('🔌 Conexión finalizada por el dispositivo'),
+      onError: (err) => logCallback?.call('❌ Error en la conexión: $err'),
     );
+
+    logCallback?.call('⚙️ Inicializando ELM327...');
+    await _initializeElm327();
+    logCallback?.call('🔗 ELM327 listo para recibir comandos OBD');
   }
 
-  /// Envía un comando OBD-II al ELM327 y devuelve la respuesta
-  Future<String> sendCommand(
-    String command, {
-    Duration timeout = const Duration(seconds: 2),
-  }) async {
+  Future<void> _initializeElm327() async {
+    final initCmds = ['ATZ', 'ATE0', 'ATL0', 'ATS0', 'ATH1', 'ATSP0'];
+    for (final cmd in initCmds) {
+      final resp = await sendCommand(cmd);
+      logCallback?.call('⚙️ Init: $cmd → $resp');
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  Future<String> sendCommand(String command, {Duration timeout = const Duration(seconds: 2)}) async {
     if (_connection == null || !_connection!.isConnected) {
       throw Exception('No hay conexión activa con el adaptador OBD');
     }
@@ -72,18 +85,17 @@ class OBDService {
     try {
       final raw = await _pendingResponse!.future.timeout(timeout);
       final clean = _cleanResponse(raw);
-      print('📡 CMD: $command → RESP: $clean');
+      logCallback?.call('📡 CMD: $command → RESP: $clean');
       return clean;
     } on TimeoutException {
-      print('⏰ Timeout esperando respuesta de $command');
-      return 'NO DATA';
+      logCallback?.call('⏰ Timeout esperando respuesta de $command');
+      return '';
     } catch (e) {
-      print('❌ Error en sendCommand: $e');
-      return 'ERROR';
+      logCallback?.call('❌ Error en sendCommand: $e');
+      return '';
     }
   }
 
-  /// Limpia el texto de la respuesta OBD (quita >, CR/LF, etc)
   String _cleanResponse(String input) {
     return input
         .replaceAll(RegExp(r'(\r|\n|>)'), ' ')
@@ -92,11 +104,54 @@ class OBDService {
         .trim();
   }
 
-  /// Cierra la conexión
+  double parseOBDResponse(String response, String pid) {
+    try {
+      final clean = response
+          .replaceAll(RegExp(r'[^0-9A-Fa-f ]'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+
+      final bytes = clean
+          .split(' ')
+          .where((b) => b.isNotEmpty)
+          .map((b) => int.parse(b, radix: 16))
+          .toList();
+
+      if (bytes.isEmpty) return 0;
+
+      final pidByte = int.parse(pid.substring(2), radix: 16);
+      for (int i = 0; i < bytes.length - 1; i++) {
+        if (bytes[i] == 0x41 && bytes[i + 1] == pidByte) {
+          return _decodePID(bytes, i + 1, pid);
+        }
+      }
+      return 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  double _decodePID(List<int> bytes, int pidIndex, String pid) {
+    switch (pid) {
+      case '010C': // RPM
+        if (pidIndex + 2 >= bytes.length) return 0;
+        return ((bytes[pidIndex + 1] * 256) + bytes[pidIndex + 2]) / 4.0;
+      case '010D': // SPEED
+        if (pidIndex + 1 >= bytes.length) return 0;
+        return bytes[pidIndex + 1].toDouble();
+      case '0105': // COOLANT
+      case '015C': // OIL TEMP
+        if (pidIndex + 1 >= bytes.length) return 0;
+        return bytes[pidIndex + 1] - 40.0;
+      default:
+        return 0;
+    }
+  }
+
   Future<void> disconnect() async {
     await _inputSubscription?.cancel();
     await _connection?.close();
     _connection = null;
-    print('🔒 Conexión cerrada.');
+    logCallback?.call('🔒 Conexión cerrada.');
   }
 }
