@@ -1,7 +1,7 @@
 class Sensor {
-  final String name;
-  final double value;
-  final String unit;
+  String name;
+  double value;
+  String unit;
 
   Sensor({
     required this.name,

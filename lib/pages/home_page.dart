@@ -6,6 +6,7 @@ import '../services/simulator_service.dart';
 import '../services/obd_service.dart';
 import '../config.dart';
 import 'package:elm327_obd_flutter_app/widgets/circular_gauge.dart';
+import 'package:elm327_obd_flutter_app/pages/performance_screen.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -66,9 +67,12 @@ class _HomePageState extends State<HomePage> {
 
   void _updateSensors(Map<String, Sensor> data) {
     if (!mounted) return;
+
     setState(() {
       data.forEach((key, value) {
-        sensors[key] = value;
+        if (sensors.containsKey(key)) {
+          sensors[key]!.value = value.value; // 🔥 ahora sí funciona
+        }
       });
     });
   }
@@ -250,6 +254,23 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('OBD Dashboard'),
         backgroundColor: Colors.blueAccent,
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PerformanceScreen(
+                    rpm: sensors['RPM']!,
+                    speed: sensors['SPEED']!,
+                    coolant: sensors['COOLANT']!,
+                  ),
+                ),
+              );
+            },
+            child: const Text('Go to Performance'),
+          ),
+        ],
       ),
       body: Column(
         children: [

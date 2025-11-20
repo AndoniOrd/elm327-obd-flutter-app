@@ -16,11 +16,11 @@ class SimulatorService {
       _simulateEngineBehavior();
 
       final sensors = {
-        'rpm': Sensor(name: 'RPM', value: _rpm, unit: 'rpm'),
-        'speed': Sensor(name: 'Velocidad', value: _speed, unit: 'km/h'),
-        'coolant': Sensor(name: 'Refrigerante', value: _coolant, unit: '°C'),
-        'oil': Sensor(name: 'Aceite', value: _oil, unit: '°C'),
-        'battery': Sensor(name: 'Batería', value: _battery, unit: 'V'),
+        'RPM': Sensor(name: 'RPM', value: _rpm, unit: 'rpm'),
+        'SPEED': Sensor(name: 'Velocidad', value: _speed, unit: 'km/h'),
+        'COOLANT': Sensor(name: 'Refrigerante', value: _coolant, unit: '°C'),
+        'OIL': Sensor(name: 'Aceite', value: _oil, unit: '°C'),
+        'BATTERY': Sensor(name: 'Batería', value: _battery, unit: 'V'),
       };
 
       onData(sensors);
